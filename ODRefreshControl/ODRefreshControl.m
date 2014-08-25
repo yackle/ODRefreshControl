@@ -144,7 +144,7 @@ static inline CGFloat lerp(CGFloat a, CGFloat b, CGFloat p)
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
 {
     if ([keyPath isEqualToString:@"contentInset"]) {
-        if (!_ignoreInset) {
+        if (!_ignoreInset && !_refreshing) {
             _shapeLayer.opacity = 0;
             self.originalContentInset = [[change objectForKey:@"new"] UIEdgeInsetsValue];
             //self.frame = CGRectMake(0, -(kTotalViewHeight + self.scrollView.contentInset.top), self.scrollView.frame.size.width, kTotalViewHeight);
@@ -156,7 +156,7 @@ static inline CGFloat lerp(CGFloat a, CGFloat b, CGFloat p)
     if (!self.enabled || _ignoreOffset) {
         return;
     }
-
+    
     CGFloat offset = [[change objectForKey:@"new"] CGPointValue].y + self.originalContentInset.top;
     
     if (_refreshing) {
@@ -167,9 +167,9 @@ static inline CGFloat lerp(CGFloat a, CGFloat b, CGFloat p)
             [CATransaction setValue:(id)kCFBooleanTrue forKey:kCATransactionDisableActions];
             _shapeLayer.position = CGPointMake(0, kMaxDistance + offset + kOpenedViewHeight);
             [CATransaction commit];
-
+            
             _activity.center = CGPointMake(floor(self.frame.size.width / 2), MIN(offset + self.frame.size.height + floor(kOpenedViewHeight / 2), self.frame.size.height - kOpenedViewHeight/ 2));
-
+            
             _ignoreInset = YES;
             _ignoreOffset = YES;
             
@@ -424,16 +424,33 @@ static inline CGFloat lerp(CGFloat a, CGFloat b, CGFloat p)
         _activity.alpha = 1;
         _activity.layer.transform = CATransform3DMakeScale(1, 1, 1);
         [_activity performSelectorOnMainThread:@selector(startAnimating) withObject:nil waitUntilDone:NO];
-
+        
         CGPoint offset = self.scrollView.contentOffset;
         _ignoreInset = YES;
         [self.scrollView setContentInset:UIEdgeInsetsMake(kOpenedViewHeight + self.originalContentInset.top, self.originalContentInset.left, self.originalContentInset.bottom, self.originalContentInset.right)];
         _ignoreInset = NO;
         [self.scrollView setContentOffset:offset animated:NO];
-
+        
         self.refreshing = YES;
         _canRefresh = NO;
     }
+}
+
+- (BOOL)isContainedView:(UIView*)sub inView:(UIView*)view
+{
+    if([view.subviews containsObject:sub]){
+        return YES;
+    }
+    
+    for(UIView *s in view.subviews){
+        if([self isContainedView:sub inView:s]){ return YES; }
+    }
+    return NO;
+}
+
+- (BOOL)isDisplayingView:(UIView*)view
+{
+    return [self isContainedView:view inView:[[[UIApplication sharedApplication] delegate] window]];
 }
 
 - (void)endRefreshing
@@ -444,8 +461,8 @@ static inline CGFloat lerp(CGFloat a, CGFloat b, CGFloat p)
         // halfway through the end animation.
         // This allows for the refresh control to clean up the observer,
         // in the case the scrollView is released while the animation is running
-        
         if(!self.scrollView.isTracking){
+            
             __block UIScrollView *blockScrollView = self.scrollView;
             [UIView animateWithDuration:0.4 animations:^{
                 _ignoreInset = YES;
@@ -465,7 +482,12 @@ static inline CGFloat lerp(CGFloat a, CGFloat b, CGFloat p)
                 // We need to use the scrollView somehow in the end block,
                 // or it'll get released in the animation block.
                 _ignoreInset = YES;
-                [blockScrollView setContentInset:self.originalContentInset];
+                if([self isDisplayingView:_scrollView]){
+                    [blockScrollView setContentInset:self.originalContentInset];
+                }
+                else{
+                    [blockScrollView setContentInset:UIEdgeInsetsZero];
+                }
                 _ignoreInset = NO;
                 
                 [_activity performSelectorOnMainThread:@selector(stopAnimating) withObject:nil waitUntilDone:NO];
